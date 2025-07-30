@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Main Colorscheme Everblush Colors
 var (
 	everblushBg0    = lipgloss.Color("#141b1e")
 	everblushRed    = lipgloss.Color("#e57474")
@@ -28,7 +27,6 @@ var (
 	everblushGray   = lipgloss.Color("#5c6a72")
 )
 
-// Messages
 type (
 	tickMsg           struct{}
 	songFinishedMsg   struct{}
@@ -36,14 +34,12 @@ type (
 	albumArtLoadedMsg string
 )
 
-// File System Entry
 type fsEntry struct {
 	name  string
 	path  string
 	isDir bool
 }
 
-// Commands
 func listenForFinished(c chan bool) tea.Cmd {
 	return func() tea.Msg {
 		<-c
@@ -58,28 +54,22 @@ func listenForLoaded(c chan bool) tea.Cmd {
 	}
 }
 
-// Model
 const (
 	visualizerWidth  = 35
 	visualizerHeight = 8
 )
 
 type Model struct {
-	// UI
 	width    int
 	height   int
 	albumArt string
 	errorMsg string
-
-	// File Explorer
 	musicRoot   string
 	currentPath string
 	entries     []fsEntry
 	allSongs    []string
 	cursor      int
 	offset      int
-
-	// Playback
 	playingIndex   int
 	loading        bool
 	DoneChan       chan bool
@@ -288,7 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.playingIndex++
 				return m, playNext()
 			} else {
-				m.playingIndex = -1 // Tidak ada lagi lagu
+				m.playingIndex = -1 
 				return m, nil
 
 			}
@@ -298,7 +288,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	// --- Left Pane (File Explorer) ---
 	var leftContent strings.Builder
 	pathHeader := PathHeaderStyle.Render(m.currentPath)
 	leftContent.WriteString(pathHeader)
@@ -353,7 +342,6 @@ func (m Model) View() string {
 		leftContent.WriteString(line + "\n")
 	}
 
-	// --- Right Pane (Player) ---
 	var rightContent strings.Builder
 	header := HeaderStyle.Render("   Dicesong ダイスの歌 ")
 	rightContent.WriteString(header)
@@ -390,7 +378,6 @@ func (m Model) View() string {
 	controls := fmt.Sprintf("\n%s \n\n%s \n\n%s \n\n%s \n\n%s \n\n%s", pauseStr, backStr, nextStr, repeatStr, shuffleStr, quitStr)
 	rightContent.WriteString(FooterStyle.Render(controls))
 
-	// --- Symmetrical Layout ---
 	paneWidth := (m.width / 2) - 4
 	leftPane := PaneStyle.Width(paneWidth).Height(m.height - 3).Render(leftContent.String())
 	rightPane := PaneStyle.Width(paneWidth).Height(m.height - 3).Render(rightContent.String())
@@ -398,7 +385,6 @@ func (m Model) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 }
 
-// --- State & File Helpers ---
 
 func saveState(m Model) {
 	state.Save(state.AppState{

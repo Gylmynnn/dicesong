@@ -27,7 +27,6 @@ func InitSpeaker(sampleRate beep.SampleRate) {
 	})
 }
 
-// stopCurrent assumes the caller holds the mutex.
 func stopCurrent() {
 	speaker.Clear()
 	if seeker != nil {
@@ -37,7 +36,6 @@ func stopCurrent() {
 	}
 }
 
-// StopCurrent is the exported function for external callers.
 func StopCurrent() {
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -51,7 +49,7 @@ func PlayMusic(path string, done chan bool) error {
 	}
 
 	var stream beep.StreamSeekCloser
-	var localFormat beep.Format // Use a local variable for format
+	var localFormat beep.Format
 
 	if strings.HasSuffix(path, ".mp3") {
 		stream, localFormat, err = mp3.Decode(f)
@@ -67,20 +65,15 @@ func PlayMusic(path string, done chan bool) error {
 		return err
 	}
 
-	// Lock only when we are ready to swap the stream
 	mutex.Lock()
 	defer mutex.Unlock()
-
-	stopCurrent() // Stop the current song (unsafe version)
-
+	stopCurrent()
 	seeker = stream
-	format = localFormat // Assign to the package-level variable
+	format = localFormat 
 	InitSpeaker(format.SampleRate)
-
 	ctrl = &beep.Ctrl{Streamer: beep.Seq(stream, beep.Callback(func() {
 		done <- true
 	})), Paused: false}
-
 	speaker.Play(ctrl)
 	return nil
 }
@@ -104,18 +97,15 @@ func IsPaused() bool {
 	return ctrl.Paused
 }
 
-
 func GetProgress() (float64, float64) {
 	mutex.Lock()
 	defer mutex.Unlock()
-
 	if seeker == nil || ctrl == nil {
 		return 0, 1
 	}
 
 	position := seeker.Position()
 	length := seeker.Len()
-
 	if length == 0 {
 		return 0, 1
 	}
