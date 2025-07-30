@@ -16,7 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// --- Everblush Colors ---
+// Main Colorscheme Everblush Colors
 var (
 	everblushBg0    = lipgloss.Color("#141b1e")
 	everblushRed    = lipgloss.Color("#e57474")
@@ -28,8 +28,7 @@ var (
 	everblushGray   = lipgloss.Color("#5c6a72")
 )
 
-// --- Messages ---
-
+// Messages
 type (
 	tickMsg           struct{}
 	songFinishedMsg   struct{}
@@ -37,15 +36,14 @@ type (
 	albumArtLoadedMsg string
 )
 
-// --- File System Entry ---
+// File System Entry
 type fsEntry struct {
 	name  string
 	path  string
 	isDir bool
 }
 
-// --- Commands ---
-
+// Commands
 func listenForFinished(c chan bool) tea.Cmd {
 	return func() tea.Msg {
 		<-c
@@ -60,8 +58,7 @@ func listenForLoaded(c chan bool) tea.Cmd {
 	}
 }
 
-// --- Model ---
-
+// Model
 const (
 	visualizerWidth  = 35
 	visualizerHeight = 8
@@ -72,16 +69,18 @@ type Model struct {
 	width    int
 	height   int
 	albumArt string
+	errorMsg string
 
 	// File Explorer
 	musicRoot   string
 	currentPath string
 	entries     []fsEntry
-	allSongs    []string // Flat list for n/b navigation
+	allSongs    []string
 	cursor      int
+	offset      int
 
 	// Playback
-	playingIndex   int // Index in allSongs
+	playingIndex   int
 	loading        bool
 	DoneChan       chan bool
 	LoadedChan     chan bool
@@ -95,8 +94,7 @@ type Model struct {
 }
 
 func InitialModel() Model {
-	rand.Seed(time.Now().UnixNano())
-
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic("Gagal mendapatkan direktori home: " + err.Error())
@@ -127,13 +125,12 @@ func InitialModel() Model {
 	}
 }
 
-// PlaybackManager runs in a separate goroutine to handle audio playback.
 func PlaybackManager(playRequest <-chan string, doneChan chan bool, loadedChan chan<- bool) {
 	for path := range playRequest {
 		err := player.PlayMusic(path, doneChan)
 		if err != nil {
-			fmt.Printf("Error playing music: %v\n", err)
 			loadedChan <- false
+			continue
 		} else {
 			loadedChan <- true
 		}
@@ -160,20 +157,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-		case "up":
+		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				if m.cursor < m.offset {
+					m.offset--
+				}
 			}
-		case "down":
+		case "down", "j":
 			if m.cursor < len(m.entries)-1 {
 				m.cursor++
+				visibleRow := m.height - 12
+				if m.cursor >= m.offset+visibleRow {
+					m.offset++
+				}
 			}
-		case "right":
+		case "right", "l":
 			selectedEntry := m.entries[m.cursor]
 			if selectedEntry.isDir {
 				m.currentPath = selectedEntry.path
 				m.entries, _ = readDir(m.currentPath)
 				m.cursor = 0
+				m.offset = 0
 			}
 		case "enter":
 			if m.loading || time.Since(m.lastPlay) < 300*time.Millisecond {
@@ -184,6 +189,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentPath = selectedEntry.path
 				m.entries, _ = readDir(m.currentPath)
 				m.cursor = 0
+				m.offset = 0
 			} else {
 				m.lastPlay = time.Now()
 				m.loading = true
@@ -191,12 +197,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.PlayRequest <- selectedEntry.path
 				saveState(m)
 			}
-		case "backspace", "left":
+		case "backspace", "left", "h":
 			parentDir := filepath.Dir(m.currentPath)
 			if parentDir != "." && parentDir != "" && strings.HasPrefix(m.currentPath, m.musicRoot) && m.currentPath != m.musicRoot {
 				m.currentPath = parentDir
 				m.entries, _ = readDir(m.currentPath)
 				m.cursor = 0
+				m.offset = 0
 			}
 		case "p":
 			player.TogglePause()
@@ -237,6 +244,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case songLoadedMsg:
 		m.loading = false
+		if !msg.success {
+			m.errorMsg = "Error playing music : " + filepath.Base(m.allSongs[m.playingIndex])
+			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
+				return songFinishedMsg{}
+			})
+		} else {
+			m.errorMsg = ""
+		}
 		return m, listenForLoaded(m.LoadedChan)
 
 	case albumArtLoadedMsg:
@@ -244,26 +259,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case songFinishedMsg:
 		m.progress, m.total = 0, 1
-		playNext := func() {
+		m.loading = false
+		m.albumArt = ""
+		m.errorMsg = ""
+
+		playNext := func() tea.Cmd {
+			if len(m.allSongs) == 0 {
+				m.playingIndex = -1
+				return nil
+			}
 			m.loading = true
+			m.albumArt = ""
 			m.PlayRequest <- m.allSongs[m.playingIndex]
 			saveState(m)
+			return tea.Batch(
+				listenForFinished(m.DoneChan),
+				listenForLoaded(m.LoadedChan),
+			)
 		}
 
-		if m.repeat {
-			playNext()
-		} else if m.shuffle {
+		if m.repeat && m.playingIndex != -1 {
+			return m, playNext()
+		} else if m.shuffle && len(m.allSongs) > 0 {
 			m.playingIndex = rand.Intn(len(m.allSongs))
-			playNext()
+			return m, playNext()
 		} else {
 			if m.playingIndex < len(m.allSongs)-1 {
 				m.playingIndex++
-				playNext()
+				return m, playNext()
 			} else {
-				m.playingIndex = -1 // End of playlist
+				m.playingIndex = -1 // Tidak ada lagi lagu
+				return m, nil
+
 			}
 		}
-		return m, tea.Batch(listenForFinished(m.DoneChan), cmd)
 	}
 	return m, cmd
 }
@@ -274,10 +303,26 @@ func (m Model) View() string {
 	pathHeader := PathHeaderStyle.Render(m.currentPath)
 	leftContent.WriteString(pathHeader)
 	leftContent.WriteString("\n")
-	leftContent.WriteString("Enter : play song or select directory")
+	leftContent.WriteString("Enter : Play song or select directory")
+	leftContent.WriteString("\n    / hlkj: Navigate")
 	leftContent.WriteString("\n\n")
 
-	for i, entry := range m.entries {
+	var statusBar string
+	if m.errorMsg != "" {
+		statusBar = lipgloss.NewStyle().
+			Foreground(everblushRed).
+			Bold(true).
+			Render("  Error: " + m.errorMsg)
+		statusBar += "\n\n"
+	}
+
+	visibleRows := m.height - 12
+	end := min(m.offset+visibleRows, len(m.entries))
+
+	for i := m.offset; i < end; i++ {
+		entry := m.entries[i]
+		index := i
+
 		var line string
 		icon := "🎵"
 		if entry.isDir {
@@ -285,20 +330,26 @@ func (m Model) View() string {
 		}
 
 		isPlaying := !entry.isDir && m.playingIndex != -1 && m.allSongs[m.playingIndex] == entry.path
-
-		if m.cursor == i {
+		maxLen := 35
+		name := entry.name
+		if len([]rune(name)) > maxLen {
+			name = string([]rune(name)[:maxLen-1]) + "…"
+		}
+		displayName := fmt.Sprintf("%s  %2d. %s", icon, i+1, name)
+		if index == m.cursor {
 			if isPlaying {
-				line = PlayingCursorStyle.Render("▶ " + icon + " " + entry.name)
+				line = PlayingCursorStyle.Render("▶ " + displayName)
 			} else {
-				line = CursorStyle.Render("› " + icon + " " + entry.name)
+				line = CursorStyle.Render("› " + displayName)
 			}
 		} else {
 			if isPlaying {
-				line = PlayingStyle.Render("  " + icon + " " + entry.name)
+				line = PlayingStyle.Render("  " + displayName)
 			} else {
-				line = NormalStyle.Render("  " + icon + " " + entry.name)
+				line = NormalStyle.Render("  " + displayName)
 			}
 		}
+
 		leftContent.WriteString(line + "\n")
 	}
 
@@ -311,12 +362,13 @@ func (m Model) View() string {
 	var nowPlayingContent strings.Builder
 	if m.loading {
 		nowPlayingContent.WriteString(LoadingStyle.Render("◌ Loading..."))
+	} else if m.errorMsg != "" {
+		rightContent.WriteString(statusBar)
 	} else if m.playingIndex != -1 {
 		nowPlaying := NowPlayingStyle.Render("Now Playing: ") + filepath.Base(m.allSongs[m.playingIndex])
 		progressBar, progressPercent := renderProgress(m.progress, m.total)
 		progressView := lipgloss.JoinHorizontal(lipgloss.Left, progressBar, progressPercent)
 		nowPlayingContent.WriteString(lipgloss.JoinVertical(lipgloss.Left, nowPlaying, progressView))
-
 		if m.albumArt != "" {
 			nowPlayingContent.WriteString("\n" + m.albumArt)
 		} else {
