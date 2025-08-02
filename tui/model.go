@@ -21,17 +21,16 @@ var (
 	everblushRed    = lipgloss.Color("#e57474")
 	everblushGreen  = lipgloss.Color("#8ccf7e")
 	everblushYellow = lipgloss.Color("#e5c76b")
-	everblushBlue   = lipgloss.Color("#67b0e8")
-	everblushCyan   = lipgloss.Color("#6cbfbf")
+	// everblushBlue   = lipgloss.Color("#67b0e8")
+	// everblushCyan   = lipgloss.Color("#6cbfbf")
 	everblushFg     = lipgloss.Color("#dadada")
 	everblushGray   = lipgloss.Color("#5c6a72")
 )
 
 type (
-	tickMsg           struct{}
-	songFinishedMsg   struct{}
-	songLoadedMsg     struct{ success bool }
-	albumArtLoadedMsg string
+	tickMsg         struct{}
+	songFinishedMsg struct{}
+	songLoadedMsg   struct{ success bool }
 )
 
 type fsEntry struct {
@@ -54,33 +53,26 @@ func listenForLoaded(c chan bool) tea.Cmd {
 	}
 }
 
-const (
-	visualizerWidth  = 35
-	visualizerHeight = 8
-)
-
 type Model struct {
-	width    int
-	height   int
-	albumArt string
-	errorMsg string
+	width       int
+	height      int
+	errorMsg    string
 	musicRoot   string
 	currentPath string
 	entries     []fsEntry
 	allSongs    []string
 	cursor      int
 	offset      int
-	playingIndex   int
-	loading        bool
-	DoneChan       chan bool
-	LoadedChan     chan bool
-	PlayRequest    chan string
-	repeat         bool
-	shuffle        bool
-	lastPlay       time.Time
-	progress       float64
-	total          float64
-	visualizerBars []int
+	playingIndex int
+	loading     bool
+	DoneChan    chan bool
+	LoadedChan  chan bool
+	PlayRequest chan string
+	repeat      bool
+	shuffle     bool
+	lastPlay    time.Time
+	progress    float64
+	total       float64
 }
 
 func InitialModel() Model {
@@ -111,7 +103,6 @@ func InitialModel() Model {
 		PlayRequest:    make(chan string, 1),
 		progress:       0,
 		total:          1,
-		visualizerBars: make([]int, visualizerWidth),
 	}
 }
 
@@ -222,13 +213,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if m.playingIndex != -1 && !m.loading && !player.IsPaused() {
 			m.progress, m.total = player.GetProgress()
-			for i := range m.visualizerBars {
-				if rand.Float32() > 0.4 {
-					m.visualizerBars[i] = rand.Intn(visualizerHeight + 1)
-				} else {
-					m.visualizerBars[i] = 0
-				}
-			}
 		}
 		return m, tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg { return tickMsg{} })
 
@@ -244,41 +228,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, listenForLoaded(m.LoadedChan)
 
-	case albumArtLoadedMsg:
-		m.albumArt = string(msg)
-
 	case songFinishedMsg:
 		m.progress, m.total = 0, 1
 		m.loading = false
-		m.albumArt = ""
 		m.errorMsg = ""
 
-		playNext := func() tea.Cmd {
-			if len(m.allSongs) == 0 {
-				m.playingIndex = -1
-				return nil
-			}
-			m.loading = true
-			m.albumArt = ""
+		if m.repeat && m.playingIndex != -1 {
 			m.PlayRequest <- m.allSongs[m.playingIndex]
-			saveState(m)
-			return tea.Batch(
+			return m, tea.Batch(
 				listenForFinished(m.DoneChan),
 				listenForLoaded(m.LoadedChan),
 			)
-		}
-
-		if m.repeat && m.playingIndex != -1 {
-			return m, playNext()
 		} else if m.shuffle && len(m.allSongs) > 0 {
 			m.playingIndex = rand.Intn(len(m.allSongs))
-			return m, playNext()
+			m.PlayRequest <- m.allSongs[m.playingIndex]
+			return m, tea.Batch(
+				listenForFinished(m.DoneChan),
+				listenForLoaded(m.LoadedChan),
+			)
 		} else {
 			if m.playingIndex < len(m.allSongs)-1 {
 				m.playingIndex++
-				return m, playNext()
+				m.PlayRequest <- m.allSongs[m.playingIndex]
+				return m, tea.Batch(
+					listenForFinished(m.DoneChan),
+					listenForLoaded(m.LoadedChan),
+				)
 			} else {
-				m.playingIndex = -1 
+				m.playingIndex = -1
 				return m, nil
 
 			}
@@ -288,44 +265,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	var leftContent strings.Builder
+	// Header
+	header := HeaderStyle.Render("   Dicesong ")
+	// File Browser
+	var browserContent strings.Builder
 	pathHeader := PathHeaderStyle.Render(m.currentPath)
-	leftContent.WriteString(pathHeader)
-	leftContent.WriteString("\n")
-	leftContent.WriteString("Enter : Play song or select directory")
-	leftContent.WriteString("\n    / hlkj: Navigate")
-	leftContent.WriteString("\n\n")
+	browserContent.WriteString(header)
+	browserContent.WriteString("\n")
+	browserContent.WriteString(pathHeader)
+	browserContent.WriteString("\n")
 
-	var statusBar string
-	if m.errorMsg != "" {
-		statusBar = lipgloss.NewStyle().
-			Foreground(everblushRed).
-			Bold(true).
-			Render("  Error: " + m.errorMsg)
-		statusBar += "\n\n"
-	}
-
-	visibleRows := m.height - 12
+	visibleRows := m.height - 8 // Adjusted for header and footer
 	end := min(m.offset+visibleRows, len(m.entries))
 
 	for i := m.offset; i < end; i++ {
 		entry := m.entries[i]
-		index := i
-
-		var line string
 		icon := "🎵"
 		if entry.isDir {
 			icon = "📁"
 		}
 
 		isPlaying := !entry.isDir && m.playingIndex != -1 && m.allSongs[m.playingIndex] == entry.path
-		maxLen := 35
-		name := entry.name
-		if len([]rune(name)) > maxLen {
-			name = string([]rune(name)[:maxLen-1]) + "…"
+		
+		// Responsive display name
+		maxWidth := m.width - 4 // Leave space for cursor, icon, etc.
+		displayName := fmt.Sprintf("%s %s", icon, entry.name)
+		if len(displayName) > maxWidth {
+			displayName = displayName[:maxWidth-3] + "..."
 		}
-		displayName := fmt.Sprintf("%s  %2d. %s", icon, i+1, name)
-		if index == m.cursor {
+
+		var line string
+		if i == m.cursor {
 			if isPlaying {
 				line = PlayingCursorStyle.Render("▶ " + displayName)
 			} else {
@@ -338,53 +308,73 @@ func (m Model) View() string {
 				line = NormalStyle.Render("  " + displayName)
 			}
 		}
-
-		leftContent.WriteString(line + "\n")
+		browserContent.WriteString(line + "\n")
 	}
 
-	var rightContent strings.Builder
-	header := HeaderStyle.Render("   Dicesong ダイスの歌 ")
-	rightContent.WriteString(header)
-	rightContent.WriteString("\n\n")
+	// Footer
+	var footer strings.Builder
 
+	// Now Playing
 	var nowPlayingContent strings.Builder
 	if m.loading {
 		nowPlayingContent.WriteString(LoadingStyle.Render("◌ Loading..."))
 	} else if m.errorMsg != "" {
-		rightContent.WriteString(statusBar)
+		nowPlayingContent.WriteString(lipgloss.NewStyle().Foreground(everblushRed).Bold(true).Render(" " + m.errorMsg))
 	} else if m.playingIndex != -1 {
-		nowPlaying := NowPlayingStyle.Render("Now Playing: ") + filepath.Base(m.allSongs[m.playingIndex])
-		progressBar, progressPercent := renderProgress(m.progress, m.total)
-		progressView := lipgloss.JoinHorizontal(lipgloss.Left, progressBar, progressPercent)
-		nowPlayingContent.WriteString(lipgloss.JoinVertical(lipgloss.Left, nowPlaying, progressView))
-		if m.albumArt != "" {
-			nowPlayingContent.WriteString("\n" + m.albumArt)
-		} else {
-			visualizer := renderVisualizer(m.visualizerBars)
-			nowPlayingContent.WriteString("\n\n" + visualizer)
-		}
+		song := filepath.Base(m.allSongs[m.playingIndex])
+		nowPlaying := NowPlayingStyle.Render("Now Playing: ") + song
+		nowPlayingContent.WriteString(nowPlaying)
 	} else {
 		nowPlayingContent.WriteString(NowPlayingStyle.Render("Select a song to play."))
 	}
-	rightContent.WriteString(NowPlayingSectionStyle.Render(nowPlayingContent.String()))
-	rightContent.WriteString("\n")
+	footer.WriteString(nowPlayingContent.String() + "\n")
 
-	repeatStr := boolStyle(m.repeat, " [r]:   Repeat 重ねる 󰮯 ============ 󰊠 ")
-	shuffleStr := boolStyle(m.shuffle, " [s]:   Shuffle ランダム 󰮯 ========= 󰊠 ")
-	pauseStr := MenuStyle.Render(" [p]:  Pause 休止 󰮯 ================ 󰊠 ")
-	backStr := MenuStyle.Render(" [b]:  Back バック 󰮯 =============== 󰊠 ")
-	nextStr := MenuStyle.Render(" [n]:  Next 次に 󰮯 ================= 󰊠 ")
-	quitStr := MenuStyle.Render(" [q]:   Quit やめる 󰮯 ============== 󰊠 ")
-	controls := fmt.Sprintf("\n%s \n\n%s \n\n%s \n\n%s \n\n%s \n\n%s", pauseStr, backStr, nextStr, repeatStr, shuffleStr, quitStr)
-	rightContent.WriteString(FooterStyle.Render(controls))
+	// Progress Bar
+	if m.playingIndex != -1 {
+		bar, percent := renderProgress(m.progress, m.total, m.width)
+		progress := lipgloss.JoinHorizontal(lipgloss.Left, bar, percent)
+		footer.WriteString(progress + "\n")
+	}
 
-	paneWidth := (m.width / 2) - 4
-	leftPane := PaneStyle.Width(paneWidth).Height(m.height - 3).Render(leftContent.String())
-	rightPane := PaneStyle.Width(paneWidth).Height(m.height - 3).Render(rightContent.String())
+	// Controls
+	// separator := lipgloss.NewStyle().Foreground(everblushGray).Render(" | ")
+	repeatStr := boolStyle(m.repeat, "  ")
+	shuffleStr := boolStyle(m.shuffle, "  ")
+	pauseStr := MenuStyle.Render("  ")
+	backStr := MenuStyle.Render("  ")
+	nextStr := MenuStyle.Render("  ")
+	quitStr := MenuStyle.Render("  ")
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+	controls := lipgloss.JoinHorizontal(lipgloss.Left,
+		pauseStr,
+		// separator,
+		backStr,
+		// separator,
+		nextStr,
+		// separator,
+		repeatStr,
+		// separator,
+		shuffleStr,
+	)
+	
+	// Align controls and quit button
+	controlsWidth := lipgloss.Width(controls)
+	quitWidth := lipgloss.Width(quitStr)
+	spacer := lipgloss.NewStyle().Width(m.width - controlsWidth - quitWidth - 4).Render("")
+
+	footer.WriteString(lipgloss.JoinHorizontal(lipgloss.Left, controls, spacer, quitStr))
+
+
+	// Final Assembly
+	browser := lipgloss.NewStyle().Padding(0, 2).Render(browserContent.String())
+	finalFooter := lipgloss.NewStyle().Padding(0, 2).Render(footer.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		// header,
+		browser,
+		finalFooter,
+	)
 }
-
 
 func saveState(m Model) {
 	state.Save(state.AppState{
@@ -456,20 +446,20 @@ var (
 	PlayingStyle           = lipgloss.NewStyle().Foreground(everblushGreen)
 	PlayingCursorStyle     = lipgloss.NewStyle().Foreground(everblushGreen).Bold(true)
 	NormalStyle            = lipgloss.NewStyle().Foreground(everblushGray)
-	MenuStyle              = lipgloss.NewStyle().Background(everblushBlue).Foreground(everblushBg0).Bold(true)
+	MenuStyle              = lipgloss.NewStyle().Foreground(everblushFg).Bold(true)
 	FooterStyle            = lipgloss.NewStyle().Foreground(everblushGray).MarginTop(1)
 	LoadingStyle           = lipgloss.NewStyle().Foreground(everblushGray).Italic(true)
 )
 
 func boolStyle(b bool, text string) string {
 	if b {
-		return lipgloss.NewStyle().Foreground(everblushBg0).Background(everblushGreen).Render(text)
+		return lipgloss.NewStyle().Foreground(everblushGreen).Bold(true).Render(text)
 	}
-	return lipgloss.NewStyle().Foreground(everblushBg0).Background(everblushBlue).Render(text)
+	return lipgloss.NewStyle().Foreground(everblushFg).Bold(true).Render(text)
 }
 
-func renderProgress(current, total float64) (string, string) {
-	barLength := visualizerWidth
+func renderProgress(current, total float64, width int) (string, string) {
+	barLength := width - 6// Adjusted for percentage
 	if total <= 0 {
 		return strings.Repeat(" ", barLength), " 0%"
 	}
@@ -480,17 +470,3 @@ func renderProgress(current, total float64) (string, string) {
 	return lipgloss.NewStyle().Foreground(everblushGreen).Render(bar), lipgloss.NewStyle().Foreground(everblushGray).Render(percentStr)
 }
 
-func renderVisualizer(bars []int) string {
-	var s strings.Builder
-	chars := []string{" ", " ", "▂", "▄", "▅", "▆", "▇", "█", "█"}
-	colors := []lipgloss.Color{everblushGreen, everblushBlue}
-
-	for _, bar := range bars {
-		if bar > visualizerHeight {
-			bar = visualizerHeight
-		}
-		color := colors[rand.Intn(len(colors))]
-		s.WriteString(lipgloss.NewStyle().Foreground(color).Render(chars[bar]))
-	}
-	return s.String()
-}
