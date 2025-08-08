@@ -22,7 +22,6 @@ var (
 	everblushGreen  = lipgloss.Color("#8ccf7e")
 	everblushYellow = lipgloss.Color("#e5c76b")
 	everblushBlue   = lipgloss.Color("#67b0e8")
-	// everblushCyan   = lipgloss.Color("#6cbfbf")
 	everblushFg   = lipgloss.Color("#dadada")
 	everblushGray = lipgloss.Color("#5c6a72")
 )
@@ -79,7 +78,7 @@ func InitialModel() Model {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	home, err := os.UserHomeDir()
 	if err != nil {
-		panic("Gagal mendapatkan direktori home: " + err.Error())
+		panic("Failed to read home directory: " + err.Error())
 	}
 
 	musicRoot := filepath.Join(home, "Music")
@@ -265,10 +264,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	// Build footer first to calculate its height
 	var footerContent strings.Builder
 
-	// Now Playing
 	var nowPlayingContent strings.Builder
 	if m.loading {
 		nowPlayingContent.WriteString(LoadingStyle.Render("◌ Loading..."))
@@ -310,19 +307,17 @@ func (m Model) View() string {
 	footer := lipgloss.NewStyle().Padding(0, 2).Render(footerContent.String())
 	footerHeight := lipgloss.Height(footer)
 
-	// Header
 	headerContent := HeaderStyle.Render("   Dicesong ")
 	header := lipgloss.NewStyle().Render(headerContent)
 	headerHeight := lipgloss.Height(header)
 
-	// File Browser
 	browserHeight := m.height - footerHeight - headerHeight
 	var browserContent strings.Builder
 
 	home, _ := os.UserHomeDir()
 	displayPath := m.currentPath
-	if strings.HasPrefix(m.currentPath, home) {
-		displayPath = "~" + strings.TrimPrefix(m.currentPath, home)
+	if after, ok := strings.CutPrefix(m.currentPath, home); ok {
+		displayPath = "~" + after
 	}
 
 	pathHeader := PathHeaderStyle.Render(displayPath)
@@ -331,7 +326,7 @@ func (m Model) View() string {
 	browserContent.WriteString(pathHeader)
 	browserContent.WriteString("\n")
 
-	visibleRows := browserHeight - 4 // account for path header and newline
+	visibleRows := browserHeight - 4 
 	end := min(m.offset+visibleRows, len(m.entries))
 
 	for i := m.offset; i < end; i++ {
@@ -376,7 +371,6 @@ func (m Model) View() string {
 		footer,
 	)
 }
-
 
 func saveState(m Model) {
 	state.Save(state.AppState{
@@ -462,7 +456,7 @@ func boolStyle(b bool, text string) string {
 }
 
 func renderProgress(current, total float64, width int) (string, string) {
-	barLength := width - 6 // Adjusted for percentage
+	barLength := width - 6
 	if total <= 0 {
 		return strings.Repeat(" ", barLength), " 0%"
 	}
