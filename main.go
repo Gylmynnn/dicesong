@@ -11,7 +11,7 @@ import (
 func main() {
 	m := tui.InitialModel()
 	go tui.PlaybackManager(m.PlayRequest, m.DoneChan, m.LoadedChan)
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	if err != nil {
 		fmt.Println("Gagal:", err)
