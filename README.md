@@ -2,6 +2,11 @@
 
 A beautiful terminal-based music player built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). Browse and play your music collection directly from the terminal with an elegant, keyboard-driven interface.
 
+## SCREENSHOT
+<img width="1921" height="1081" alt="image" src="https://github.com/user-attachments/assets/c2d3ce02-b08f-4b50-a659-aa1a0a8f99e6" />
+<br/>
+<img width="1921" height="1081" alt="image" src="https://github.com/user-attachments/assets/8655bf9e-5593-49de-b712-873df4a93798" />
+
 ## Features
 
 - **File Browser**: Navigate through your music library with an intuitive file browser
