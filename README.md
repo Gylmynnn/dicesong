@@ -10,7 +10,7 @@ A beautiful terminal-based music player built with Go and [Bubble Tea](https://g
 ## Features
 
 - **File Browser**: Navigate through your music library with an intuitive file browser
-- **Audio Playback**: Play MP3 and WAV files with smooth audio streaming
+- **Audio Playback**: Play MP3, WAV, FLAC, and OGG files with smooth audio streaming
 - **Playback Controls**: Play, pause, skip, and repeat tracks
 - **Playback Modes**: 
   - Repeat mode - Loop the current track

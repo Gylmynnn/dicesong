@@ -419,7 +419,7 @@ func (m Model) renderProgressSection() string {
 	currentTime := formatDuration(m.progress, m.total)
 	totalTime := formatDuration(m.total, m.total)
 
-	barWidth := max(m.width - len(currentTime) - len(totalTime) - 8, 10)
+	barWidth := max(m.width-len(currentTime)-len(totalTime)-8, 10)
 	bar := renderProgressBar(m.progress, m.total, barWidth)
 
 	timeLeft := PlayerTimeStyle.Render(currentTime)
@@ -540,7 +540,7 @@ func readDir(path string) ([]fsEntry, error) {
 	var entries []fsEntry
 	for _, file := range files {
 		isDir := file.IsDir()
-		isMusicFile := strings.HasSuffix(file.Name(), ".mp3") || strings.HasSuffix(file.Name(), ".wav")
+		isMusicFile := isSupportedAudioFile(file.Name())
 		if isDir || isMusicFile {
 			entries = append(entries, fsEntry{
 				name:  file.Name(),
@@ -566,12 +566,21 @@ func loadAllSongs(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && (strings.HasSuffix(d.Name(), ".mp3") || strings.HasSuffix(d.Name(), ".wav")) {
+		if !d.IsDir() && isSupportedAudioFile(d.Name()) {
 			songs = append(songs, path)
 		}
 		return nil
 	})
 	return songs, err
+}
+
+func isSupportedAudioFile(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".mp3") ||
+		strings.HasSuffix(lower, ".wav") ||
+		strings.HasSuffix(lower, ".flac") ||
+		strings.HasSuffix(lower, ".ogg") ||
+		strings.HasSuffix(lower, ".oga")
 }
 
 func findSongIndex(songs []string, path string) int {
