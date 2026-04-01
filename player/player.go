@@ -3,13 +3,16 @@ package player
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/faiface/beep"
+	"github.com/faiface/beep/flac"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
+	"github.com/faiface/beep/vorbis"
 	"github.com/faiface/beep/wav"
 )
 
@@ -51,13 +54,19 @@ func PlayMusic(path string, done chan bool) error {
 	var stream beep.StreamSeekCloser
 	var localFormat beep.Format
 
-	if strings.HasSuffix(path, ".mp3") {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mp3":
 		stream, localFormat, err = mp3.Decode(f)
-	} else if strings.HasSuffix(path, ".wav") {
+	case ".wav":
 		stream, localFormat, err = wav.Decode(f)
-	} else {
+	case ".flac":
+		stream, localFormat, err = flac.Decode(f)
+	case ".ogg", ".oga":
+		stream, localFormat, err = vorbis.Decode(f)
+	default:
 		f.Close()
-		return errors.New("format tidak didukung")
+		return errors.New("format tidak didukung (gunakan: mp3, wav, flac, ogg)")
 	}
 
 	if err != nil {
@@ -69,7 +78,7 @@ func PlayMusic(path string, done chan bool) error {
 	defer mutex.Unlock()
 	stopCurrent()
 	seeker = stream
-	format = localFormat 
+	format = localFormat
 	InitSpeaker(format.SampleRate)
 	ctrl = &beep.Ctrl{Streamer: beep.Seq(stream, beep.Callback(func() {
 		done <- true
