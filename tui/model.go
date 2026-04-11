@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Gylmynnn/dicesong/notifier"
 	"github.com/Gylmynnn/dicesong/player"
 	"github.com/Gylmynnn/dicesong/state"
 	"github.com/charmbracelet/bubbletea"
@@ -189,6 +190,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "p":
 			player.TogglePause()
+			if m.playingIndex >= 0 && m.playingIndex < len(m.allSongs) {
+				notifier.Playback(filepath.Base(m.allSongs[m.playingIndex]), player.IsPaused())
+			}
 		case "n":
 			if m.playingIndex < len(m.allSongs)-1 && !m.loading {
 				m.loading = true
@@ -221,11 +225,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if !msg.success {
 			m.errorMsg = "Error playing: " + filepath.Base(m.allSongs[m.playingIndex])
+			notifier.Error(m.errorMsg)
 			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg {
 				return songFinishedMsg{}
 			})
 		} else {
 			m.errorMsg = ""
+			if m.playingIndex >= 0 && m.playingIndex < len(m.allSongs) {
+				notifier.NowPlaying(filepath.Base(m.allSongs[m.playingIndex]), m.shuffle, m.repeat)
+			}
 		}
 		return m, listenForLoaded(m.LoadedChan)
 
