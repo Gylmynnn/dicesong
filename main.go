@@ -39,9 +39,10 @@ KEYBOARD SHORTCUTS:
     r           Toggle repeat mode
     s           Toggle shuffle mode
 
-  General:
-    q           Quit application
-    Ctrl+C      Force quit
+   General:
+     /           Search songs (Esc to exit search)
+     q           Quit application
+     Ctrl+C      Force quit
 
 FEATURES:
   • Browse and play MP3 and WAV files
