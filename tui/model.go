@@ -76,6 +76,8 @@ type Model struct {
 	lastPlay     time.Time
 	progress     float64
 	total        float64
+	searchMode   bool
+	searchQuery  string
 }
 
 func InitialModel() Model {
@@ -106,6 +108,8 @@ func InitialModel() Model {
 		PlayRequest:  make(chan string, 1),
 		progress:     0,
 		total:        1,
+		searchMode:   false,
+		searchQuery:  "",
 	}
 }
 
@@ -137,82 +141,144 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-				if m.cursor < m.offset {
-					m.offset--
+		if m.searchMode {
+			switch msg.String() {
+			case "esc":
+				m.searchMode = false
+				m.searchQuery = ""
+				m.entries, _ = readDir(m.currentPath)
+				m.cursor = 0
+				m.offset = 0
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+					if m.cursor < m.offset {
+						m.offset--
+					}
+				}
+			case "down", "j":
+				if m.cursor < len(m.entries)-1 {
+					m.cursor++
+					visibleRow := m.height - 16
+					if m.cursor >= m.offset+visibleRow {
+						m.offset++
+					}
+				}
+			case "backspace":
+				if len(m.searchQuery) > 0 {
+					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+					m.filterEntries()
+				}
+			case "enter":
+				selectedEntry := m.entries[m.cursor]
+				if selectedEntry.isDir {
+					m.currentPath = selectedEntry.path
+					m.entries, _ = readDir(m.currentPath)
+					m.cursor = 0
+					m.offset = 0
+					m.searchMode = false
+					m.searchQuery = ""
+				} else {
+					if m.loading || time.Since(m.lastPlay) < 300*time.Millisecond {
+						break
+					}
+					m.lastPlay = time.Now()
+					m.loading = true
+					m.playingIndex = findSongIndex(m.allSongs, selectedEntry.path)
+					m.PlayRequest <- selectedEntry.path
+					saveState(m)
+					m.searchMode = false
+					m.searchQuery = ""
+					m.entries, _ = readDir(m.currentPath)
+					m.cursor = 0
+					m.offset = 0
+				}
+			default:
+				if len(msg.String()) == 1 {
+					m.searchQuery += msg.String()
+					m.filterEntries()
 				}
 			}
-		case "down", "j":
-			if m.cursor < len(m.entries)-1 {
-				m.cursor++
-				visibleRow := m.height - 16
-				if m.cursor >= m.offset+visibleRow {
-					m.offset++
+		} else {
+			switch msg.String() {
+			case "ctrl+c", "q":
+				return m, tea.Quit
+			case "/":
+				m.searchMode = true
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+					if m.cursor < m.offset {
+						m.offset--
+					}
 				}
-			}
-		case "right", "l":
-			selectedEntry := m.entries[m.cursor]
-			if selectedEntry.isDir {
-				m.currentPath = selectedEntry.path
-				m.entries, _ = readDir(m.currentPath)
-				m.cursor = 0
-				m.offset = 0
-			}
-		case "enter":
-			if m.loading || time.Since(m.lastPlay) < 300*time.Millisecond {
-				break
-			}
-			selectedEntry := m.entries[m.cursor]
-			if selectedEntry.isDir {
-				m.currentPath = selectedEntry.path
-				m.entries, _ = readDir(m.currentPath)
-				m.cursor = 0
-				m.offset = 0
-			} else {
-				m.lastPlay = time.Now()
-				m.loading = true
-				m.playingIndex = findSongIndex(m.allSongs, selectedEntry.path)
-				m.PlayRequest <- selectedEntry.path
+			case "down", "j":
+				if m.cursor < len(m.entries)-1 {
+					m.cursor++
+					visibleRow := m.height - 16
+					if m.cursor >= m.offset+visibleRow {
+						m.offset++
+					}
+				}
+			case "right", "l":
+				selectedEntry := m.entries[m.cursor]
+				if selectedEntry.isDir {
+					m.currentPath = selectedEntry.path
+					m.entries, _ = readDir(m.currentPath)
+					m.cursor = 0
+					m.offset = 0
+				}
+			case "enter":
+				if m.loading || time.Since(m.lastPlay) < 300*time.Millisecond {
+					break
+				}
+				selectedEntry := m.entries[m.cursor]
+				if selectedEntry.isDir {
+					m.currentPath = selectedEntry.path
+					m.entries, _ = readDir(m.currentPath)
+					m.cursor = 0
+					m.offset = 0
+				} else {
+					m.lastPlay = time.Now()
+					m.loading = true
+					m.playingIndex = findSongIndex(m.allSongs, selectedEntry.path)
+					m.PlayRequest <- selectedEntry.path
+					saveState(m)
+				}
+			case "backspace", "left", "h":
+				parentDir := filepath.Dir(m.currentPath)
+				if parentDir != "." && parentDir != "" && strings.HasPrefix(m.currentPath, m.musicRoot) && m.currentPath != m.musicRoot {
+					m.currentPath = parentDir
+					m.entries, _ = readDir(m.currentPath)
+					m.cursor = 0
+					m.offset = 0
+				}
+			case "p":
+				player.TogglePause()
+				if m.playingIndex >= 0 && m.playingIndex < len(m.allSongs) {
+					notifier.Playback(filepath.Base(m.allSongs[m.playingIndex]), player.IsPaused())
+				}
+			case "n":
+				if m.playingIndex < len(m.allSongs)-1 && !m.loading {
+					m.loading = true
+					m.playingIndex++
+					m.PlayRequest <- m.allSongs[m.playingIndex]
+					saveState(m)
+				}
+			case "b":
+				if m.playingIndex > 0 && !m.loading {
+					m.loading = true
+					m.playingIndex--
+					m.PlayRequest <- m.allSongs[m.playingIndex]
+					saveState(m)
+				}
+			case "r":
+				m.repeat = !m.repeat
+				saveState(m)
+			case "s":
+				m.shuffle = !m.shuffle
 				saveState(m)
 			}
-		case "backspace", "left", "h":
-			parentDir := filepath.Dir(m.currentPath)
-			if parentDir != "." && parentDir != "" && strings.HasPrefix(m.currentPath, m.musicRoot) && m.currentPath != m.musicRoot {
-				m.currentPath = parentDir
-				m.entries, _ = readDir(m.currentPath)
-				m.cursor = 0
-				m.offset = 0
-			}
-		case "p":
-			player.TogglePause()
-			if m.playingIndex >= 0 && m.playingIndex < len(m.allSongs) {
-				notifier.Playback(filepath.Base(m.allSongs[m.playingIndex]), player.IsPaused())
-			}
-		case "n":
-			if m.playingIndex < len(m.allSongs)-1 && !m.loading {
-				m.loading = true
-				m.playingIndex++
-				m.PlayRequest <- m.allSongs[m.playingIndex]
-				saveState(m)
-			}
-		case "b":
-			if m.playingIndex > 0 && !m.loading {
-				m.loading = true
-				m.playingIndex--
-				m.PlayRequest <- m.allSongs[m.playingIndex]
-				saveState(m)
-			}
-		case "r":
-			m.repeat = !m.repeat
-			saveState(m)
-		case "s":
-			m.shuffle = !m.shuffle
-			saveState(m)
 		}
 
 	case tickMsg:
@@ -289,7 +355,12 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	titleContent := HeaderTitleStyle.Render("    DICESONG  ")
+	var titleContent string
+	if m.searchMode {
+		titleContent = HeaderTitleStyle.Render(fmt.Sprintf("    DICESONG - Search: %s", m.searchQuery))
+	} else {
+		titleContent = HeaderTitleStyle.Render("    DICESONG  ")
+	}
 
 	songCount := HeaderInfoStyle.Render(fmt.Sprintf("%d Songs", len(m.allSongs)))
 
@@ -566,6 +637,18 @@ func readDir(path string) ([]fsEntry, error) {
 	})
 
 	return entries, nil
+}
+
+func (m *Model) filterEntries() {
+	allEntries, _ := readDir(m.currentPath)
+	m.entries = []fsEntry{}
+	for _, entry := range allEntries {
+		if strings.Contains(strings.ToLower(entry.name), strings.ToLower(m.searchQuery)) {
+			m.entries = append(m.entries, entry)
+		}
+	}
+	m.cursor = 0
+	m.offset = 0
 }
 
 func loadAllSongs(root string) ([]string, error) {
